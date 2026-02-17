@@ -227,7 +227,6 @@
                 }
             };
 
-            // FIXED: Scope corrected
             const handleFileUploadChange = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -237,6 +236,16 @@
                 }
                 setSelectedFile(file);
                 setNewItem(prev => ({ ...prev, title: file.name }));
+            };
+
+            // Cloudinary Helper: Force download for Cloudinary URLs
+            const getDownloadUrl = (url) => {
+                if (!url) return "#";
+                if (url.includes("cloudinary.com")) {
+                    // This flag forces Cloudinary to return the file as an attachment
+                    return url.replace("/upload/", "/upload/fl_attachment/");
+                }
+                return url;
             };
 
             const saveItem = async (e) => {
@@ -251,6 +260,8 @@
                         const formData = new FormData();
                         formData.append('file', selectedFile);
                         formData.append('upload_preset', cloudinaryUploadPreset);
+                        // resource_type auto is REQUIRED for PDFs and non-image files
+                        formData.append('resource_type', 'auto');
 
                         const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/upload`, {
                             method: 'POST',
@@ -404,8 +415,13 @@
                                         {item.type === 'folder' ? (
                                             <button onClick={() => setCurrentFolderId(item.id)} className="w-full flex justify-center py-3.5 bg-amber-50 font-bold text-[10px] uppercase tracking-widest text-amber-600 rounded-xl hover:bg-amber-400 hover:text-white transition-all">Open Folder</button>
                                         ) : (
-                                            <a href={item.url} target="_blank" className="w-full flex justify-center py-3.5 bg-slate-50 font-bold text-[10px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm">
-                                                {item.type === 'file' ? 'View File' : 'Launch Link'}
+                                            <a 
+                                                href={item.type === 'file' ? getDownloadUrl(item.url) : item.url} 
+                                                target="_blank" 
+                                                download={item.type === 'file' ? item.title : false}
+                                                className="w-full flex justify-center py-3.5 bg-slate-50 font-bold text-[10px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm"
+                                            >
+                                                {item.type === 'file' ? 'Download / View' : 'Launch Link'}
                                             </a>
                                         )}
                                     </div>
