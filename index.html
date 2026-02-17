@@ -57,9 +57,9 @@
             position: absolute;
             cursor: pointer;
             top: 0; left: 0; right: 0; bottom: 0;
-            background-color: #cbd5e1;
+            background-color: #e2e8f0;
             transition: .4s;
-            border-radius: 24px;
+            border-radius: 20px;
         }
         .slider:before {
             position: absolute;
@@ -94,16 +94,13 @@
         const { useState, useEffect, useRef, useMemo } = React;
 
         // --- GLOBAL CONFIG ---
-        // UPDATED: Using your provided Key for live website deployment
         const geminiApiKey = "AIzaSyDHRZVaQcak2kLmcGF5Ck6YhAYY2GnRCs8"; 
         const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
         const MASTER_KEY = "1234"; 
 
-        // Cloudinary Credentials
         const cloudinaryCloudName = "dyqiluwfu"; 
         const cloudinaryUploadPreset = "Portal"; 
 
-        // Firebase Context
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
             apiKey: "AIzaSyCJYmrpUChqCP0piuf4CN1kdAaXZgYAzKw", 
             authDomain: "portal-d08a4.firebaseapp.com",
@@ -181,27 +178,25 @@
                 initFirebase().then(services => setFb(services));
             }, []);
 
-            // RULE 3: AUTH BEFORE QUERIES
             useEffect(() => {
                 if (!fb) return;
-                const authenticate = async () => {
+                const runAuth = async () => {
                     try {
                         if (initialAuthToken) {
                             await fb.signInWithCustomToken(fb.auth, initialAuthToken);
                         } else {
                             await fb.signInAnonymously(fb.auth);
                         }
-                    } catch (e) { console.error("Auth System Error", e); }
+                    } catch (e) { console.error("Auth Failure:", e); }
                 };
-                authenticate();
+                runAuth();
                 const unsub = fb.onAuthStateChanged(fb.auth, setUser);
                 return () => unsub();
             }, [fb]);
 
-            // RULE 1: STRICT PATHS
             useEffect(() => {
                 if (!isCloudEnabled || !fb || !user) {
-                    setItems(JSON.parse(localStorage.getItem('portal_v12_local') || '[]'));
+                    setItems(JSON.parse(localStorage.getItem('portal_v13_local') || '[]'));
                     return;
                 }
                 const itemsCol = fb.collection(fb.db, 'artifacts', portalAppId, 'public', 'data', 'items');
@@ -209,9 +204,9 @@
                     const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                     data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                     setItems(data);
-                    localStorage.setItem('portal_v12_local', JSON.stringify(data));
+                    localStorage.setItem('portal_v13_local', JSON.stringify(data));
                 }, (err) => {
-                    console.error("Firestore Permission denied. Path check required.", err);
+                    console.error("Firestore Sync Error:", err);
                 });
                 return () => unsub();
             }, [fb, user, isCloudEnabled]);
@@ -227,7 +222,6 @@
                 };
             }, [items]);
 
-            // --- RE-CALIBRATED GEMINI CORE ---
             const callGemini = async (prompt, systemInstruction = "") => {
                 const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiApiKey}`;
                 const payload = {
@@ -241,17 +235,13 @@
                         body: JSON.stringify(payload)
                     });
                     const data = await response.json();
-                    if (data.error) throw new Error(data.error.message);
                     return data.candidates?.[0]?.content?.parts?.[0]?.text;
-                } catch (e) {
-                    console.error("Gemini AI Offline:", e);
-                    return null;
-                }
+                } catch (e) { return null; }
             };
 
             const generateHubInsight = async () => {
                 setIsGeneratingHubInsight(true);
-                const prompt = `Dashboard Data: ${stats.links} links, ${stats.files} files, ${stats.accesses} clicks. Analyze this growth. 2 sentences only.`;
+                const prompt = `Dashboard Stats: ${stats.links} links, ${stats.files} files, ${stats.accesses} clicks. Analyze growth. 2 sentences.`;
                 const insight = await callGemini(prompt, "You are a professional Data Operations Lead.");
                 if (insight) setHubInsight(insight);
                 setIsGeneratingHubInsight(false);
@@ -260,21 +250,21 @@
             const autoFillMetadata = async () => {
                 if (!newItem.url) return;
                 setIsAiGenerating(true);
-                const prompt = `Target URL: ${newItem.url}. Return strictly JSON: {"title": "concise name"}`;
+                const prompt = `URL: ${newItem.url}. Return strictly JSON: {"title": "concise name"}`;
                 const result = await callGemini(prompt, "You are a metadata assistant.");
                 if (result) {
                     try {
                         const clean = result.replace(/```json|```/g, '').trim();
                         const data = JSON.parse(clean);
                         setNewItem(prev => ({ ...prev, title: data.title || prev.title }));
-                    } catch(e) { console.error("JSON Parse Error", e); }
+                    } catch(e) {}
                 }
                 setIsAiGenerating(false);
             };
 
             const generateItemInsight = async (item) => {
                 setInsightLoadingId(item.id);
-                const prompt = `Resource: ${item.title} (${item.type}). Give a 1-sentence creative summary of its value.`;
+                const prompt = `Resource: ${item.title}. Give a 1-sentence creative summary of its value.`;
                 const insight = await callGemini(prompt, "You are an inspiring mentor.");
                 if (insight && isCloudEnabled && fb && user) {
                     await fb.updateDoc(fb.doc(fb.db, 'artifacts', portalAppId, 'public', 'data', 'items', item.id), { insight });
@@ -287,7 +277,7 @@
                 try {
                     const docRef = fb.doc(fb.db, 'artifacts', portalAppId, 'public', 'data', 'items', item.id);
                     await fb.updateDoc(docRef, { [type]: (item[type] || 0) + 1 });
-                } catch (e) { console.error("Tracking System Offline", e); }
+                } catch (e) {}
             };
 
             const handleLogin = (e) => {
@@ -296,7 +286,6 @@
                     setIsAdmin(true);
                     sessionStorage.setItem('portal_admin', 'true');
                     setShowLogin(false);
-                    setPasswordInput('');
                 } else {
                     setLoginError(true);
                 }
@@ -304,17 +293,9 @@
 
             const handleFileUploadChange = (e) => {
                 const file = e.target.files[0];
-                if (!file || file.size > 10 * 1024 * 1024) { 
-                    alert("Max 10MB per file!"); return; 
-                }
+                if (!file || file.size > 10 * 1024 * 1024) { alert("Max 10MB!"); return; }
                 setSelectedFile(file);
                 setNewItem(prev => ({ ...prev, title: file.name }));
-            };
-
-            const getDownloadUrl = (url) => {
-                if (!url) return "#";
-                if (url.includes("cloudinary.com")) return url.replace("/upload/", "/upload/fl_attachment/");
-                return url;
             };
 
             const saveItem = async (e) => {
@@ -340,18 +321,39 @@
                         await fb.setDoc(fb.doc(fb.db, 'artifacts', portalAppId, 'public', 'data', 'items', itemData.id), itemData);
                     } else {
                         const updated = [itemData, ...items];
-                        localStorage.setItem('portal_v12_local', JSON.stringify(updated));
+                        localStorage.setItem('portal_v13_local', JSON.stringify(updated));
                         setItems(updated);
                     }
                     setNewItem({ title: '', url: '', category: 'Project' });
                     setSelectedFile(null);
                     setIsAdding(false);
-                } catch (e) { alert("Save failure. Ensure Cloudinary is set to Unsigned."); } finally { setIsUploading(false); }
+                } catch (e) { alert("Upload error."); } finally { setIsUploading(false); }
             };
 
+            // FIXED: Recursive removal to clean up Analytics
             const removeItem = async (id) => {
-                if (isAdmin && isCloudEnabled && fb && user) {
-                    await fb.deleteDoc(fb.doc(fb.db, 'artifacts', portalAppId, 'public', 'data', 'items', id));
+                if (!isAdmin) return;
+
+                // 1. Identify all children if it's a folder
+                const toDeleteIds = [id];
+                const findChildren = (parentId) => {
+                    items.filter(i => i.parentId === parentId).forEach(child => {
+                        toDeleteIds.push(child.id);
+                        if (child.type === 'folder') findChildren(child.id);
+                    });
+                };
+                const target = items.find(i => i.id === id);
+                if (target && target.type === 'folder') findChildren(id);
+
+                // 2. Perform deletion
+                if (isCloudEnabled && fb && user) {
+                    for (const delId of toDeleteIds) {
+                        await fb.deleteDoc(fb.doc(fb.db, 'artifacts', portalAppId, 'public', 'data', 'items', delId));
+                    }
+                } else {
+                    const updated = items.filter(i => !toDeleteIds.includes(i.id));
+                    localStorage.setItem('portal_v13_local', JSON.stringify(updated));
+                    setItems(updated);
                 }
             };
 
@@ -407,12 +409,12 @@
                         </div>
                     </header>
 
-                    {/* Stats Dashboard */}
+                    {/* Analytics Dashboard */}
                     {showAnalytics && (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[200] animate-in fade-in duration-300">
                             <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border border-white transform animate-in zoom-in duration-300">
                                 <div className="flex justify-between items-start mb-8">
-                                    <h2 className="text-2xl font-[900] text-slate-800 tracking-tight">System Performance Hub</h2>
+                                    <h2 className="text-2xl font-[900] text-slate-800 tracking-tight">Hub Metrics Dashboard</h2>
                                     <button onClick={() => setShowAnalytics(false)} className="p-3 hover:bg-slate-50 rounded-full transition-all"><Icon name="x" size={20} /></button>
                                 </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
@@ -420,8 +422,8 @@
                                         { label: 'Links', val: stats.links, icon: 'link', bg: 'bg-sky-50', text: 'text-sky-600' },
                                         { label: 'Files', val: stats.files, icon: 'file', bg: 'bg-violet-50', text: 'text-violet-600' },
                                         { label: 'PDFs', val: stats.pdfs, icon: 'file-text', bg: 'bg-rose-50', text: 'text-rose-600' },
-                                        { label: 'Clicks', val: stats.accesses, icon: 'mouse-pointer-2', bg: 'bg-emerald-50', text: 'text-emerald-600' },
-                                        { label: 'Downloads', val: stats.downloads, icon: 'download', bg: 'bg-amber-50', text: 'text-amber-600' },
+                                        { label: 'Usage', val: stats.accesses, icon: 'mouse-pointer-2', bg: 'bg-emerald-50', text: 'text-emerald-600' },
+                                        { label: 'Saved', val: stats.downloads, icon: 'download', bg: 'bg-amber-50', text: 'text-amber-600' },
                                         { label: 'Folders', val: stats.folders, icon: 'folder', bg: 'bg-indigo-50', text: 'text-indigo-600' },
                                     ].map(card => (
                                         <div key={card.label} className={`${card.bg} p-6 rounded-[2rem] border border-white shadow-sm`}>
@@ -439,7 +441,7 @@
                                                 {isGeneratingHubInsight ? <Icon name="loader-2" className="animate-spin" size={14} /> : <Icon name="zap" className="text-yellow-400" size={14} />}
                                             </button>
                                         </div>
-                                        <p className="text-sm font-medium italic leading-relaxed text-slate-300 pr-10">{hubInsight || "Let AI analyze your hub growth."}</p>
+                                        <p className="text-sm font-medium italic leading-relaxed text-slate-300 pr-10">{hubInsight || "Click the spark to let AI analyze your hub growth."}</p>
                                     </div>
                                     <Icon name="brain-circuit" size={120} className="absolute bottom-[-40px] right-[-20px] text-white opacity-5" />
                                 </div>
@@ -461,7 +463,7 @@
                         {currentItems.length === 0 ? (
                             <div className="py-40 text-center border-2 border-dashed border-sky-100 rounded-[3rem] bg-white/30 backdrop-blur-sm">
                                 <Icon name="folder-open" className="text-sky-200 mx-auto mb-6" size={64} />
-                                <p className="text-slate-400 font-semibold italic">Directory is currently empty.</p>
+                                <p className="text-slate-400 font-semibold italic">Directory is empty.</p>
                                 {!isAdmin && <p className="text-[10px] text-slate-300 mt-4 uppercase font-bold tracking-widest text-center">Access Restricted to Admin</p>}
                             </div>
                         ) : (
@@ -509,7 +511,6 @@
                         )}
                     </main>
 
-                    {/* Unlock Modal */}
                     {showLogin && (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[300] animate-in fade-in duration-200">
                             <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 shadow-2xl border border-white transform animate-in zoom-in duration-200 text-center">
@@ -526,7 +527,6 @@
                         </div>
                     )}
 
-                    {/* Add Item Modal */}
                     {isAdding && isAdmin && (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[200] animate-in fade-in duration-300">
                             <div className="bg-white w-full max-w-lg rounded-[3.5rem] p-10 shadow-2xl border border-white transform animate-in zoom-in duration-300">
@@ -548,14 +548,14 @@
                                     )}
                                     {addType === 'folder' && (
                                         <div className="space-y-4">
-                                            <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block px-2 text-slate-400">Collection Label</label>
+                                            <label className="text-[10px] font-black uppercase tracking-widest block px-2 text-slate-400">Collection Label</label>
                                             <input type="text" required placeholder="Project Assets" className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] outline-none" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})} />
                                         </div>
                                     )}
                                     {addType === 'link' && (
                                         <div className="space-y-4">
                                             <div className="flex justify-between items-center px-2">
-                                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Redirection URL</label>
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Redirection URL</label>
                                                 <button type="button" onClick={autoFillMetadata} disabled={!newItem.url || isAiGenerating} className="text-sky-500 text-[10px] font-black uppercase flex items-center gap-2 bg-sky-50 px-2 py-1 rounded-lg transition-all">
                                                     {isAiGenerating ? <Icon name="loader-2" className="animate-spin" size={12} /> : <Icon name="sparkles" size={12} />} Magic Fill
                                                 </button>
