@@ -20,12 +20,12 @@
     <!-- Load Firebase as Modules -->
     <script type="module">
         import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
-        import { getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, query } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
-        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+        import { getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, query, getDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
 
         window.FirebaseBridge = {
-            initializeApp, getApps, getApp, getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, query,
-            getAuth, signInAnonymously, onAuthStateChanged
+            initializeApp, getApps, getApp, getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, query, getDoc,
+            getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken
         };
     </script>
 
@@ -36,7 +36,7 @@
             overflow-x: hidden;
         }
         .pastel-gradient {
-            background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 50%, #f5f3ff 100%);
+            background: linear-gradient(135deg, #f8faff 0%, #ffffff 50%, #fdfaff 100%);
         }
         @keyframes float {
             0% { transform: translateY(0px); }
@@ -94,7 +94,7 @@
         const { useState, useEffect, useRef, useMemo } = React;
 
         // --- CONFIGURATION ---
-        const apiKey = "AIzaSyCiLbux2VxBTFmcZEDiuIKmeTpWaW6MttY"; 
+        const apiKey = ""; // API Key provided by env
         const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
         const MASTER_KEY = "1234"; 
 
@@ -102,17 +102,10 @@
         const cloudinaryCloudName = "dyqiluwfu"; 
         const cloudinaryUploadPreset = "Portal"; 
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyCJYmrpUChqCP0piuf4CN1kdAaXZgYAzKw", 
-            authDomain: "portal-d08a4.firebaseapp.com",
-            projectId: "portal-d08a4",
-            storageBucket: "portal-d08a4.firebasestorage.app",
-            messagingSenderId: "999873421490",
-            appId: "1:999873421490:web:b930ef9a0c067c3d2369ab",
-            measurementId: "G-FM007Q1897"
-        };
-
-        const appId = 'sarvartha-redirection-hub-v1';
+        // Environment Variables
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sarvartha-portal-v1';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         const initFirebase = async () => {
             let attempts = 0;
@@ -120,7 +113,7 @@
                 await new Promise(r => setTimeout(r, 100));
                 attempts++;
             }
-            if (!window.FirebaseBridge) return null;
+            if (!window.FirebaseBridge || !firebaseConfig.apiKey) return null;
             const fb = window.FirebaseBridge;
             try {
                 let app = fb.getApps().length === 0 ? fb.initializeApp(firebaseConfig) : fb.getApp();
@@ -156,17 +149,15 @@
             const [user, setUser] = useState(null);
             const [fb, setFb] = useState(null);
             const [insightLoadingId, setInsightLoadingId] = useState(null);
-            const [authError, setAuthError] = useState(null);
             const [hubInsight, setHubInsight] = useState('');
             const [isGeneratingHubInsight, setIsGeneratingHubInsight] = useState(false);
+            const [showAnalytics, setShowAnalytics] = useState(false);
             
-            // Form states
             const [newItem, setNewItem] = useState({ title: '', url: '', category: 'Project' });
             const [selectedFile, setSelectedFile] = useState(null);
             const [isUploading, setIsUploading] = useState(false);
             const [isAiGenerating, setIsAiGenerating] = useState(false);
 
-            // Admin Logic
             const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('portal_admin') === 'true');
             const [showLogin, setShowLogin] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
@@ -181,14 +172,34 @@
                 localStorage.setItem('portal_cloud_pref', isCloudEnabled);
             }, [isCloudEnabled]);
 
+            // Initialize Services
             useEffect(() => {
                 initFirebase().then(services => setFb(services));
             }, []);
 
-            // Sync with Firebase
+            // Handle Authentication (Rule 3)
+            useEffect(() => {
+                if (!fb) return;
+                const initAuth = async () => {
+                    try {
+                        if (initialAuthToken) {
+                            await fb.signInWithCustomToken(fb.auth, initialAuthToken);
+                        } else {
+                            await fb.signInAnonymously(fb.auth);
+                        }
+                    } catch(e) { 
+                        console.error("Auth Error", e);
+                    }
+                };
+                initAuth();
+                const unsubscribe = fb.onAuthStateChanged(fb.auth, setUser);
+                return () => unsubscribe();
+            }, [fb]);
+
+            // Sync with Firebase (Post-Auth Guard)
             useEffect(() => {
                 if (!isCloudEnabled || !fb || !user) {
-                    setItems(JSON.parse(localStorage.getItem('portal_v6_data') || '[]'));
+                    setItems(JSON.parse(localStorage.getItem('portal_v8_data') || '[]'));
                     return;
                 }
                 const q = fb.collection(fb.db, 'artifacts', appId, 'public', 'data', 'items');
@@ -197,103 +208,86 @@
                     fetched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                     setItems(fetched);
                 }, (err) => {
-                    if (err.code === 'permission-denied') setAuthError("Storage Restricted.");
+                    console.error("Firestore Listener Error:", err);
                 });
                 return () => unsub();
             }, [fb, user, isCloudEnabled]);
 
-            useEffect(() => {
-                if (!fb) return;
-                const initAuth = async () => {
-                    try {
-                        await fb.signInAnonymously(fb.auth);
-                        setAuthError(null);
-                    } catch(e) { 
-                        setAuthError(e.message);
-                    }
-                };
-                initAuth();
-                const unsub = fb.onAuthStateChanged(fb.auth, u => setUser(u));
-                return () => unsub();
-            }, [fb]);
-
-            // Stats Computation
             const stats = useMemo(() => {
-                const totals = { 
+                return { 
                     links: items.filter(i => i.type === 'link').length, 
                     files: items.filter(i => i.type === 'file').length,
                     pdfs: items.filter(i => i.type === 'file' && i.title?.toLowerCase().endsWith('.pdf')).length,
+                    folders: items.filter(i => i.type === 'folder').length,
                     accesses: items.reduce((acc, i) => acc + (i.accesses || 0), 0),
                     downloads: items.reduce((acc, i) => acc + (i.downloads || 0), 0)
                 };
-                return totals;
             }, [items]);
 
-            // --- Gemini Helper ---
+            // --- Gemini Logic ---
             const callGemini = async (prompt, systemInstruction = "") => {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined
+                };
+
                 try {
                     const response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }],
-                            systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined
-                        })
+                        body: JSON.stringify(payload)
                     });
                     const data = await response.json();
                     return data.candidates?.[0]?.content?.parts?.[0]?.text;
-                } catch (e) { return null; }
+                } catch (e) {
+                    console.error("Gemini Failure", e);
+                    return null;
+                }
             };
 
             const generateHubInsight = async () => {
                 setIsGeneratingHubInsight(true);
-                const prompt = `Here are the stats for my Redirection Portal: 
-                - Total Links: ${stats.links}
-                - Total Files: ${stats.files} (including ${stats.pdfs} PDFs)
-                - Total Accesses/Clicks: ${stats.accesses}
-                - Total Downloads: ${stats.downloads}
-                Give me a 2-sentence highly motivating and professional summary of this hub's current activity and growth.`;
-                
-                const insight = await callGemini(prompt, "You are a Chief Operations Officer.");
+                const prompt = `Current Portal Stats: 
+                - Folders: ${stats.folders}
+                - Links: ${stats.links}
+                - Total Files: ${stats.files} (${stats.pdfs} PDFs)
+                - Usage: ${stats.accesses} clicks and ${stats.downloads} downloads.
+                Analyze the data and provide a highly motivating 2-sentence visionary summary.`;
+                const insight = await callGemini(prompt, "You are a professional COO analyzer.");
                 if (insight) setHubInsight(insight);
                 setIsGeneratingHubInsight(false);
-            };
-
-            const trackActivity = async (item, type) => {
-                // type: 'accesses' or 'downloads'
-                if (!isCloudEnabled || !fb || !user) return;
-                const docRef = fb.doc(fb.db, 'artifacts', appId, 'public', 'data', 'items', item.id);
-                const currentVal = item[type] || 0;
-                await fb.updateDoc(docRef, { [type]: currentVal + 1 });
             };
 
             const autoFillMetadata = async () => {
                 if (!newItem.url) return;
                 setIsAiGenerating(true);
-                const prompt = `URL: ${newItem.url}. Return JSON only: {"title": "concise name"}`;
+                const prompt = `URL: ${newItem.url}. Return ONLY valid JSON: {"title": "suggested concise name"}`;
                 const result = await callGemini(prompt, "Return strictly valid JSON.");
                 if (result) {
                     try {
-                        const data = JSON.parse(result.replace(/```json|```/g, '').trim());
+                        const cleanJson = result.replace(/```json|```/g, '').trim();
+                        const data = JSON.parse(cleanJson);
                         setNewItem(prev => ({ ...prev, title: data.title || prev.title }));
                     } catch(e) {}
                 }
                 setIsAiGenerating(false);
             };
 
-            const generateInsight = async (item) => {
-                if (!isAdmin) return;
+            const generateItemInsight = async (item) => {
                 setInsightLoadingId(item.id);
-                const prompt = `Analyze: ${item.title} (${item.url || 'local file'}). 1-sentence insight why this is valuable.`;
-                const insight = await callGemini(prompt, "You are a creative mentor.");
-                if (insight) {
-                    if (isCloudEnabled && fb && user) {
-                        const docRef = fb.doc(fb.db, 'artifacts', appId, 'public', 'data', 'items', item.id);
-                        await fb.updateDoc(docRef, { insight });
-                    }
+                const prompt = `Item: ${item.title}. Provide 1 short, professional sentence about why this asset is valuable.`;
+                const insight = await callGemini(prompt, "You are an AI creative advisor.");
+                if (insight && isCloudEnabled && fb && user) {
+                    await fb.updateDoc(fb.doc(fb.db, 'artifacts', appId, 'public', 'data', 'items', item.id), { insight });
                 }
                 setInsightLoadingId(null);
+            };
+
+            const trackActivity = async (item, type) => {
+                if (!isCloudEnabled || !fb || !user) return;
+                const docRef = fb.doc(fb.db, 'artifacts', appId, 'public', 'data', 'items', item.id);
+                await fb.updateDoc(docRef, { [type]: (item[type] || 0) + 1 });
             };
 
             const handleLogin = (e) => {
@@ -310,8 +304,10 @@
 
             const handleFileUploadChange = (e) => {
                 const file = e.target.files[0];
-                if (!file) return;
-                if (file.size > 10 * 1024 * 1024) { alert("Max 10MB!"); return; }
+                if (!file || file.size > 10 * 1024 * 1024) { 
+                    alert("Max 10MB per file!"); 
+                    return; 
+                }
                 setSelectedFile(file);
                 setNewItem(prev => ({ ...prev, title: file.name }));
             };
@@ -335,110 +331,134 @@
                         formData.append('resource_type', 'auto');
                         const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/upload`, { method: 'POST', body: formData });
                         const fileData = await res.json();
-                        if (fileData.error) throw new Error(fileData.error.message);
                         finalUrl = fileData.secure_url;
                     }
                     const itemData = { 
-                        ...newItem, 
-                        url: finalUrl || '', accesses: 0, downloads: 0,
+                        ...newItem, url: finalUrl || '', accesses: 0, downloads: 0,
                         id: Date.now().toString(), type: addType, parentId: currentFolderId, createdAt: new Date().toISOString() 
                     };
                     if (isCloudEnabled && fb && user) {
-                        const docRef = fb.doc(fb.db, 'artifacts', appId, 'public', 'data', 'items', itemData.id);
-                        await fb.setDoc(docRef, itemData);
+                        await fb.setDoc(fb.doc(fb.db, 'artifacts', appId, 'public', 'data', 'items', itemData.id), itemData);
+                    } else {
+                        const updated = [itemData, ...items];
+                        setItems(updated);
+                        localStorage.setItem('portal_v8_data', JSON.stringify(updated));
                     }
                     setNewItem({ title: '', url: '', category: 'Project' });
                     setSelectedFile(null);
                     setIsAdding(false);
-                } catch (error) { alert("Error: " + error.message); } finally { setIsUploading(false); }
+                } catch (e) { alert("Upload failed. Ensure Cloudinary is set to Unsigned."); } finally { setIsUploading(false); }
             };
 
             const removeItem = async (id) => {
-                if (!isAdmin) return;
-                if (isCloudEnabled && fb && user) {
+                if (isAdmin && isCloudEnabled && fb && user) {
                     await fb.deleteDoc(fb.doc(fb.db, 'artifacts', appId, 'public', 'data', 'items', id));
+                } else if (isAdmin) {
+                    const updated = items.filter(i => i.id !== id);
+                    setItems(updated);
+                    localStorage.setItem('portal_v8_data', JSON.stringify(updated));
                 }
             };
 
             const currentItems = items.filter(i => i.parentId === currentFolderId && i.title.toLowerCase().includes(searchTerm.toLowerCase()));
-            const getBreadcrumbs = () => {
+            const breadcrumbs = useMemo(() => {
                 const trail = [];
                 let curr = items.find(i => i.id === currentFolderId);
                 while (curr) { trail.unshift(curr); curr = items.find(i => i.id === curr.parentId); }
                 return trail;
-            };
-            const breadcrumbs = getBreadcrumbs();
+            }, [items, currentFolderId]);
 
             return (
                 <div className="p-4 md:p-12 max-w-7xl mx-auto flex flex-col min-h-screen">
                     <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 mb-12">
                         <div className="relative flex items-center gap-5">
-                            <div className="absolute -top-10 -left-10 w-24 h-24 bg-sky-200/40 rounded-full blur-3xl animate-pulse"></div>
+                            <div className="absolute -top-10 -left-10 w-24 h-24 bg-sky-200/20 rounded-full blur-3xl" />
                             <div onClick={() => !isAdmin ? setShowLogin(true) : setIsAdmin(false)} className="relative group cursor-pointer z-10">
-                                <div className={`bg-gradient-to-br from-sky-400 to-violet-400 p-3.5 rounded-2xl shadow-xl transform transition-all ${isAdmin ? 'ring-4 ring-sky-300' : 'group-hover:scale-110'}`}>
+                                <div className={`bg-gradient-to-br from-sky-500 to-violet-500 p-3.5 rounded-2xl shadow-xl transform transition-all ${isAdmin ? 'ring-4 ring-sky-300' : 'group-hover:scale-110'}`}>
                                     <Icon name="sparkles" className="text-white fill-white" size={32} />
                                 </div>
-                                {isAdmin && <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white p-1 rounded-full z-20 shadow-lg border-2 border-white"><Icon name="check" size={8} /></div>}
+                                {isAdmin && <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white p-1 rounded-full border-2 border-white shadow-lg"><Icon name="check" size={8} /></div>}
                             </div>
                             <div>
-                                <h1 className="text-4xl font-[900] tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-400 to-violet-500">Portal</h1>
+                                <h1 className="text-4xl font-[900] tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-violet-600">Portal</h1>
                                 <p className="text-slate-400 font-medium tracking-wide uppercase text-[10px]">Sarvartha's Redirection Hub</p>
                             </div>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row items-center gap-6 w-full md:w-auto">
-                            {/* Analytics Toggle (Nice Feature) */}
+                        <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
                             {isAdmin && (
-                                <div className="flex items-center gap-4 bg-white/60 p-2 rounded-2xl border border-sky-100/50">
-                                    <div className="flex flex-col px-2">
-                                        <span className="text-[8px] font-black uppercase text-slate-400">Hub Analytics</span>
-                                        <span className="text-[10px] font-bold text-sky-600">{stats.links}L • {stats.files}F • {stats.accesses}A</span>
-                                    </div>
-                                    <button onClick={generateHubInsight} className="p-2.5 bg-sky-50 text-sky-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all">
-                                        {isGeneratingHubInsight ? <Icon name="loader-2" className="animate-spin" size={14} /> : <Icon name="brain-circuit" size={14} />}
-                                    </button>
-                                </div>
+                                <button onClick={() => setShowAnalytics(true)} className="flex items-center gap-2 px-5 py-3 bg-white border border-sky-100 rounded-[1.5rem] shadow-sm hover:shadow-md transition-all group">
+                                    <Icon name="bar-chart-3" className="text-sky-500 group-hover:rotate-12 transition-transform" size={18} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Stats Hub</span>
+                                </button>
                             )}
-                            <div className="flex items-center gap-3 bg-white/50 px-4 py-2 rounded-2xl border border-sky-100/50 shadow-sm">
-                                <span className={`text-[10px] font-black uppercase tracking-widest ${isCloudEnabled ? 'text-sky-500' : 'text-slate-400'}`}>Cloud Sync</span>
-                                <label className="switch">
-                                    <input type="checkbox" checked={isCloudEnabled} onChange={() => setIsCloudEnabled(!isCloudEnabled)} />
-                                    <span className="slider"></span>
-                                </label>
+                            
+                            <div className="relative flex-1 sm:w-64 group">
+                                <Icon name="search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-sky-400" size={16} />
+                                <input type="text" placeholder="Search portal..." className="w-full pl-11 pr-4 py-4 bg-white/90 border border-sky-100 rounded-[1.5rem] outline-none shadow-sm focus:ring-4 focus:ring-sky-500/5 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             </div>
-                            <div className="flex gap-4 w-full sm:w-auto">
-                                <div className="relative flex-1 sm:w-64 group">
-                                    <Icon name="search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-sky-400 transition-colors" size={16} />
-                                    <input type="text" placeholder="Search..." className="w-full pl-11 pr-4 py-4 bg-white/90 border border-sky-100 rounded-[1.5rem] outline-none shadow-sm focus:ring-4 focus:ring-sky-500/5 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                                </div>
-                                {isAdmin && (
-                                    <button onClick={() => setIsAdding(true)} className="bg-gradient-to-r from-sky-400 to-violet-400 text-white p-4 rounded-[1.5rem] shadow-xl shadow-sky-500/20 hover:scale-105 active:scale-95 transition-all"><Icon name="plus" size={24} /></button>
-                                )}
-                            </div>
+                            
+                            {isAdmin && (
+                                <button onClick={() => setIsAdding(true)} className="bg-gradient-to-r from-sky-400 to-violet-400 text-white p-4 rounded-[1.5rem] shadow-xl hover:scale-105 active:scale-95 transition-all">
+                                    <Icon name="plus" size={24} />
+                                </button>
+                            )}
                         </div>
                     </header>
 
-                    {/* Global Hub Insight Modal (Nice Feature) */}
-                    {hubInsight && (
-                        <div className="mb-12 p-8 bg-gradient-to-br from-sky-500 to-violet-600 rounded-[3rem] text-white shadow-2xl relative overflow-hidden animate-in fade-in slide-in-from-top-4">
-                            <div className="absolute top-0 right-0 p-8 opacity-10"><Icon name="brain-circuit" size={120} /></div>
-                            <div className="relative z-10">
-                                <div className="flex items-center gap-3 mb-4">
-                                    <div className="p-2 bg-white/20 rounded-lg backdrop-blur-md"><Icon name="sparkles" size={16} /></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest">Global Hub Summary</span>
+                    {/* Analytics Modal */}
+                    {showAnalytics && (
+                        <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[200] animate-in fade-in duration-300">
+                            <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border border-white transform animate-in zoom-in duration-300">
+                                <div className="flex justify-between items-start mb-8">
+                                    <div>
+                                        <h2 className="text-2xl font-[900] text-slate-800">Hub Analytics</h2>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Growth & Engagement</p>
+                                    </div>
+                                    <button onClick={() => setShowAnalytics(false)} className="p-3 hover:bg-slate-50 rounded-full text-slate-400 transition-all"><Icon name="x" size={20} /></button>
                                 </div>
-                                <p className="text-lg font-medium leading-relaxed italic pr-12">"{hubInsight}"</p>
-                                <button onClick={() => setHubInsight('')} className="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full"><Icon name="x" size={16} /></button>
+                                
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
+                                    {[
+                                        { label: 'Links', val: stats.links, icon: 'link', color: 'text-sky-500', bg: 'bg-sky-50' },
+                                        { label: 'Files', val: stats.files, icon: 'file', color: 'text-violet-500', bg: 'bg-violet-50' },
+                                        { label: 'Folders', val: stats.folders, icon: 'folder', color: 'text-amber-500', bg: 'bg-amber-50' },
+                                        { label: 'PDFs', val: stats.pdfs, icon: 'file-text', color: 'text-rose-500', bg: 'bg-rose-50' },
+                                        { label: 'Usage', val: stats.accesses, icon: 'mouse-pointer-2', color: 'text-emerald-500', bg: 'bg-emerald-50' },
+                                        { label: 'Saved', val: stats.downloads, icon: 'download', color: 'text-indigo-500', bg: 'bg-indigo-50' },
+                                    ].map(card => (
+                                        <div key={card.label} className={`${card.bg} p-6 rounded-[2rem] border border-white/50 shadow-sm`}>
+                                            <Icon name={card.icon} className={`${card.color} mb-3`} size={16} />
+                                            <div className="text-2xl font-black text-slate-800 leading-none mb-1">{card.val}</div>
+                                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">{card.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden">
+                                    <div className="relative z-10">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-400">Hub Insight Spark ✨</span>
+                                            <button onClick={generateHubInsight} disabled={isGeneratingHubInsight} className="bg-white/10 hover:bg-white/20 p-2 rounded-xl transition-all">
+                                                {isGeneratingHubInsight ? <Icon name="loader-2" className="animate-spin" size={14} /> : <Icon name="zap" className="text-yellow-400" size={14} />}
+                                            </button>
+                                        </div>
+                                        <p className="text-sm font-medium italic leading-relaxed text-slate-300 pr-10">
+                                            {hubInsight || "Click the spark to let Gemini analyze your portal performance."}
+                                        </p>
+                                    </div>
+                                    <Icon name="brain-circuit" size={120} className="absolute bottom-[-40px] right-[-20px] text-white opacity-5" />
+                                </div>
                             </div>
                         </div>
                     )}
 
-                    <nav className="flex items-center gap-2 mb-8 bg-white/40 p-3 rounded-2xl overflow-x-auto whitespace-nowrap custom-scrollbar">
-                        <button onClick={() => setCurrentFolderId('root')} className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all ${currentFolderId === 'root' ? 'bg-sky-400 text-white shadow-sm' : 'text-slate-400 hover:bg-white/60'}`}>Home</button>
+                    <nav className="flex items-center gap-2 mb-10 bg-white/40 p-3 rounded-2xl overflow-x-auto whitespace-nowrap custom-scrollbar">
+                        <button onClick={() => setCurrentFolderId('root')} className={`text-[10px] font-black uppercase px-3 py-1.5 rounded-lg transition-all ${currentFolderId === 'root' ? 'bg-sky-400 text-white shadow-sm' : 'text-slate-400 hover:bg-white'}`}>Home</button>
                         {breadcrumbs.map((crumb) => (
                             <React.Fragment key={crumb.id}>
                                 <Icon name="chevron-right" className="text-slate-300" size={12} />
-                                <button onClick={() => setCurrentFolderId(crumb.id)} className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all ${currentFolderId === crumb.id ? 'bg-sky-400 text-white' : 'text-slate-400 hover:bg-white/60'}`}>{crumb.title}</button>
+                                <button onClick={() => setCurrentFolderId(crumb.id)} className={`text-[10px] font-black uppercase px-3 py-1.5 rounded-lg transition-all ${currentFolderId === crumb.id ? 'bg-sky-400 text-white shadow-sm' : 'text-slate-400 hover:bg-white'}`}>{crumb.title}</button>
                             </React.Fragment>
                         ))}
                     </nav>
@@ -446,14 +466,14 @@
                     <main className="flex-grow">
                         {currentItems.length === 0 ? (
                             <div className="py-40 text-center border-2 border-dashed border-sky-100 rounded-[3rem] bg-white/30 backdrop-blur-sm">
-                                <Icon name="folder-open" className="text-sky-100 mx-auto mb-6" size={64} />
-                                <p className="text-slate-400 font-semibold tracking-tight px-4 italic">No items here yet.</p>
+                                <Icon name="folder-open" className="text-sky-200 mx-auto mb-6" size={64} />
+                                <p className="text-slate-400 font-semibold italic">Folder is empty.</p>
                                 {!isAdmin && <p className="text-[10px] text-slate-300 mt-4 uppercase font-bold tracking-widest">Access Restricted to Admin</p>}
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
                                 {currentItems.map(item => (
-                                    <div key={item.id} className="group bg-white/80 backdrop-blur-xl border border-white p-6 rounded-[2rem] hover:shadow-2xl hover:shadow-sky-500/10 transition-all duration-500">
+                                    <div key={item.id} className="group bg-white/80 backdrop-blur-xl border border-white p-7 rounded-[2.5rem] hover:shadow-2xl hover:shadow-sky-500/10 transition-all duration-500 flex flex-col">
                                         <div className="flex justify-between mb-6">
                                             <div className="flex items-center gap-2">
                                                 {item.type === 'folder' && <Icon name="folder" size={14} className="text-amber-400 fill-amber-400" />}
@@ -462,32 +482,31 @@
                                                 <span className="px-3 py-1 text-[8px] font-black uppercase tracking-widest rounded-full bg-slate-100 text-slate-400">{item.type}</span>
                                             </div>
                                             {isAdmin && (
-                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                                    <button onClick={() => generateInsight(item)} className="p-2 text-sky-400 hover:bg-sky-50 rounded-full" title="AI Insight">{insightLoadingId === item.id ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="brain-circuit" />}</button>
-                                                    <button onClick={() => removeItem(item.id)} className="p-2 text-slate-300 hover:text-red-400 transition-all" title="Delete"><Icon name="trash-2" /></button>
+                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                    <button onClick={() => generateItemInsight(item)} className="p-2 text-sky-400 hover:bg-sky-50 rounded-full" title="AI Insight">{insightLoadingId === item.id ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="brain-circuit" />}</button>
+                                                    <button onClick={() => removeItem(item.id)} className="p-2 text-slate-300 hover:text-red-400 transition-all"><Icon name="trash-2" /></button>
                                                 </div>
                                             )}
                                         </div>
-                                        <h3 className="font-bold text-lg mb-2 text-slate-800 leading-tight truncate pr-4">{item.title}</h3>
+                                        <h3 className="font-bold text-xl mb-2 text-slate-800 leading-tight truncate pr-4">{item.title}</h3>
                                         
-                                        {/* Usage Stats Label (Nice Feature) */}
-                                        <div className="flex items-center gap-3 mb-4 text-[9px] font-bold text-slate-300 uppercase tracking-tighter">
+                                        <div className="flex items-center gap-3 mb-6 text-[9px] font-black uppercase tracking-tighter text-slate-300">
                                             <span className="flex items-center gap-1"><Icon name="eye" size={10} /> {item.accesses || 0}</span>
                                             {item.type === 'file' && <span className="flex items-center gap-1"><Icon name="download-cloud" size={10} /> {item.downloads || 0}</span>}
                                         </div>
 
-                                        {item.insight && <div className="mb-4 p-4 bg-sky-50/50 rounded-2xl border border-sky-100/50"><p className="text-[10px] leading-relaxed text-sky-700 italic font-medium">✨ {item.insight}</p></div>}
+                                        {item.insight && <div className="mb-6 p-4 bg-sky-50/50 rounded-2xl border border-sky-100/50"><p className="text-[10px] leading-relaxed text-sky-700 italic font-medium">✨ {item.insight}</p></div>}
                                         
-                                        <div className="flex flex-col gap-2">
+                                        <div className="mt-auto pt-2 flex flex-col gap-2">
                                             {item.type === 'folder' ? (
-                                                <button onClick={() => setCurrentFolderId(item.id)} className="w-full flex justify-center py-3.5 bg-amber-50 font-bold text-[10px] uppercase tracking-widest text-amber-600 rounded-xl hover:bg-amber-400 hover:text-white transition-all">Open Folder</button>
+                                                <button onClick={() => setCurrentFolderId(item.id)} className="w-full flex justify-center py-4 bg-amber-50 font-bold text-[10px] uppercase tracking-widest text-amber-600 rounded-xl hover:bg-amber-400 hover:text-white transition-all">Open Folder</button>
                                             ) : item.type === 'file' ? (
                                                 <div className="flex gap-2">
                                                     <a href={item.url} target="_blank" onClick={() => trackActivity(item, 'accesses')} className="flex-1 flex justify-center py-3 bg-slate-50 font-bold text-[9px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm">View</a>
-                                                    <a href={getDownloadUrl(item.url)} download={item.title} onClick={() => trackActivity(item, 'downloads')} className="flex-1 flex justify-center py-3 bg-slate-100 font-bold text-[9px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm">Download</a>
+                                                    <a href={getDownloadUrl(item.url)} download={item.title} onClick={() => trackActivity(item, 'downloads')} className="flex-1 flex justify-center py-3 bg-slate-100 font-bold text-[9px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm">Save</a>
                                                 </div>
                                             ) : (
-                                                <a href={item.url} target="_blank" onClick={() => trackActivity(item, 'accesses')} className="w-full flex justify-center py-3.5 bg-slate-50 font-bold text-[10px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm">Launch Link</a>
+                                                <a href={item.url} target="_blank" onClick={() => trackActivity(item, 'accesses')} className="w-full flex justify-center py-4 bg-slate-50 font-bold text-[10px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm">Launch</a>
                                             )}
                                         </div>
                                     </div>
@@ -496,12 +515,60 @@
                         )}
                     </main>
 
-                    {/* Modals same as before */}
+                    {/* Modals */}
+                    {isAdding && isAdmin && (
+                        <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[200] animate-in fade-in duration-300">
+                            <div className="bg-white w-full max-w-lg rounded-[3.5rem] p-10 shadow-2xl border border-white transform animate-in zoom-in duration-300">
+                                <div className="flex gap-2 mb-8 bg-slate-100 p-1.5 rounded-2xl">
+                                    {['file', 'folder', 'link'].map(t => (
+                                        <button key={t} onClick={() => setAddType(t)} className={`flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all ${addType === t ? 'bg-white shadow-sm text-sky-500' : 'text-slate-400'}`}>{t}</button>
+                                    ))}
+                                </div>
+                                <form onSubmit={saveItem} className="space-y-6">
+                                    {addType === 'file' && (
+                                        <div className="space-y-6">
+                                            <div className="relative group border-2 border-dashed border-sky-100 rounded-[2rem] p-14 text-center hover:border-sky-300 transition-all cursor-pointer bg-slate-50/50">
+                                                <input type="file" onChange={handleFileUploadChange} className="absolute inset-0 opacity-0 cursor-pointer" />
+                                                <Icon name="upload-cloud" size={40} className="text-sky-300 mb-4" />
+                                                <p className="text-xs text-slate-500 font-bold leading-relaxed">{selectedFile ? selectedFile.name : "Choose File"}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {addType === 'folder' && (
+                                        <div className="space-y-4">
+                                            <label className="text-[10px] font-black uppercase tracking-widest block px-2 text-slate-400">Folder Name</label>
+                                            <input type="text" required placeholder="My Folder" className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] outline-none" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})} />
+                                        </div>
+                                    )}
+                                    {addType === 'link' && (
+                                        <div className="space-y-4">
+                                            <div className="flex justify-between items-center px-2">
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Destination URL</label>
+                                                <button type="button" onClick={autoFillMetadata} disabled={!newItem.url || isAiGenerating} className="text-sky-500 text-[10px] font-black uppercase flex items-center gap-2 px-2 py-1 bg-sky-50 rounded-lg hover:bg-sky-100 transition-all">
+                                                    {isAiGenerating ? <Icon name="loader-2" className="animate-spin" size={12} /> : <Icon name="sparkles" size={12} />} Magic Fill
+                                                </button>
+                                            </div>
+                                            <input type="url" required placeholder="https://..." className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] outline-none" value={newItem.url} onChange={e => setNewItem({...newItem, url: e.target.value})} />
+                                            <label className="text-[10px] font-black uppercase tracking-widest block px-2 text-slate-400">Display Title</label>
+                                            <input type="text" required placeholder="My Link Name" className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] outline-none" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})} />
+                                        </div>
+                                    )}
+                                    <div className="flex gap-4 pt-4">
+                                        <button type="button" onClick={() => {setIsAdding(false); setSelectedFile(null);}} className="flex-1 py-5 font-black uppercase text-[11px] text-slate-400">Cancel</button>
+                                        <button type="submit" disabled={isUploading || (addType === 'file' && !selectedFile)} className="flex-1 py-5 font-black uppercase bg-gradient-to-r from-sky-400 to-violet-500 text-white rounded-[1.5rem] shadow-xl disabled:opacity-30">
+                                            {isUploading ? "Uploading..." : "Save Item"}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
                     {showLogin && (
-                        <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[150] animate-in fade-in duration-200">
+                        <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[300] animate-in fade-in duration-200">
                             <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 shadow-2xl border border-white transform animate-in zoom-in duration-200 text-center">
                                 <Icon name="lock" className="text-sky-400 mb-4" size={24} />
-                                <h2 className="text-xl font-black mb-6 text-slate-800 uppercase tracking-tighter">Enter Secret Key</h2>
+                                <h2 className="text-xl font-black mb-6 text-slate-800 uppercase tracking-tighter">Enter Admin Key</h2>
                                 <form onSubmit={handleLogin} className="space-y-4">
                                     <input type="password" autoFocus placeholder="••••" className={`w-full p-4 bg-slate-50 border-none rounded-xl outline-none text-center font-bold tracking-widest focus:ring-2 ${loginError ? 'ring-2 ring-red-400' : 'focus:ring-sky-200'}`} value={passwordInput} onChange={e => { setPasswordInput(e.target.value); setLoginError(false); }} />
                                     <div className="flex gap-2">
@@ -512,62 +579,10 @@
                             </div>
                         </div>
                     )}
-
-                    {isAdding && isAdmin && (
-                        <div className="fixed inset-0 modal-overlay flex items-center justify-center p-6 z-[100] animate-in fade-in duration-300">
-                            <div className="bg-white w-full max-w-lg rounded-[3.5rem] p-10 shadow-2xl border border-white transform animate-in zoom-in duration-300">
-                                <div className="flex gap-2 mb-8 bg-slate-100 p-1.5 rounded-2xl">
-                                    {['file', 'folder', 'link'].map(t => (
-                                        <button key={t} onClick={() => setAddType(t)} className={`flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all ${addType === t ? 'bg-white shadow-sm text-sky-500' : 'text-slate-400'}`}>{t}</button>
-                                    ))}
-                                </div>
-                                <form onSubmit={saveItem} className="space-y-6">
-                                    {addType === 'file' && (
-                                        <div className="space-y-6 text-center">
-                                            <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block">Upload File (Max 10MB)</label>
-                                            <div className="relative group border-2 border-dashed border-sky-100 rounded-[1.5rem] p-12 text-center hover:border-sky-300 transition-all cursor-pointer bg-slate-50/50">
-                                                <input type="file" onChange={handleFileUploadChange} className="absolute inset-0 opacity-0 cursor-pointer" />
-                                                <Icon name="upload-cloud" size={40} className="text-sky-300 mb-4" />
-                                                <p className="text-[12px] text-slate-500 font-bold">{selectedFile ? selectedFile.name : "Choose File"}</p>
-                                                {selectedFile && <p className="text-[9px] text-slate-400 mt-2">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB</p>}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {addType === 'folder' && (
-                                        <div className="space-y-4">
-                                            <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block px-2">Folder Name</label>
-                                            <input type="text" required placeholder="New Folder" className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] outline-none focus:ring-4 focus:ring-sky-500/5" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})} />
-                                        </div>
-                                    )}
-
-                                    {addType === 'link' && (
-                                        <div className="space-y-4">
-                                            <div className="flex justify-between items-center px-2">
-                                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">URL</label>
-                                                <button type="button" onClick={autoFillMetadata} disabled={!newItem.url || isAiGenerating} className="text-sky-500 text-[10px] font-black uppercase flex items-center gap-2 bg-sky-50 px-2 py-1 rounded-lg transition-all">{isAiGenerating ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="sparkles" size={12} />} Magic Fill</button>
-                                            </div>
-                                            <input type="url" required placeholder="https://..." className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] outline-none focus:ring-4 focus:ring-sky-500/5" value={newItem.url} onChange={e => setNewItem({...newItem, url: e.target.value})} />
-                                            <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block px-2">Title</label>
-                                            <input type="text" required placeholder="My Link" className="w-full p-5 bg-slate-50 border-none rounded-[1.5rem] outline-none focus:ring-4 focus:ring-sky-500/5" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})} />
-                                        </div>
-                                    )}
-
-                                    <div className="flex gap-4 pt-6">
-                                        <button type="button" onClick={() => {setIsAdding(false); setSelectedFile(null);}} className="flex-1 py-5 font-black uppercase text-[11px] text-slate-400 hover:text-slate-600 transition-all">Cancel</button>
-                                        <button type="submit" disabled={isUploading || (addType === 'file' && !selectedFile)} className="flex-1 py-5 font-black uppercase bg-gradient-to-r from-sky-400 to-violet-500 text-white rounded-[1.5rem] shadow-xl shadow-sky-500/20 disabled:opacity-30 flex items-center justify-center gap-2">
-                                            {isUploading && <Icon name="loader-2" className="animate-spin" size={14} />}
-                                            {isUploading ? "Uploading..." : "Save Item"}
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    )}
                     
                     <footer className="mt-auto pb-8 pt-20 text-center space-y-4">
                         <Icon name="heart" className="text-pink-300 fill-pink-300 float-icon" size={14} />
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Created with Love • Designed by Sarvartha</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-300">Created with Love • Designed by Sarvartha</p>
                     </footer>
                 </div>
             );
