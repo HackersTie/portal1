@@ -96,7 +96,7 @@
         // --- CONFIGURATION ---
         const apiKey = "AIzaSyCiLbux2VxBTFmcZEDiuIKmeTpWaW6MttY"; 
         const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
-        const MASTER_KEY = "1234"; // Secret key for admin mode
+        const MASTER_KEY = "1234"; 
 
         // CLOUDINARY CREDENTIALS
         const cloudinaryCloudName = "dyqiluwfu"; 
@@ -158,12 +158,10 @@
             const [insightLoadingId, setInsightLoadingId] = useState(null);
             const [authError, setAuthError] = useState(null);
             
-            // Form states
             const [newItem, setNewItem] = useState({ title: '', url: '', category: 'Project' });
             const [selectedFile, setSelectedFile] = useState(null);
             const [isUploading, setIsUploading] = useState(false);
 
-            // Admin Logic
             const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('portal_admin') === 'true');
             const [showLogin, setShowLogin] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
@@ -182,7 +180,6 @@
                 initFirebase().then(services => setFb(services));
             }, []);
 
-            // Sync with Firebase
             useEffect(() => {
                 if (!isCloudEnabled || !fb || !user) {
                     setItems(JSON.parse(localStorage.getItem('portal_v4_data') || '[]'));
@@ -238,11 +235,10 @@
                 setNewItem(prev => ({ ...prev, title: file.name }));
             };
 
-            // Cloudinary Helper: Force download for Cloudinary URLs
+            // Cloudinary Download Helper
             const getDownloadUrl = (url) => {
                 if (!url) return "#";
                 if (url.includes("cloudinary.com")) {
-                    // This flag forces Cloudinary to return the file as an attachment
                     return url.replace("/upload/", "/upload/fl_attachment/");
                 }
                 return url;
@@ -263,7 +259,7 @@
                         // resource_type auto is REQUIRED for PDFs and non-image files
                         formData.append('resource_type', 'auto');
 
-                        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/upload`, {
+                        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/auto/upload`, {
                             method: 'POST',
                             body: formData
                         });
@@ -342,7 +338,6 @@
                         <div className="relative flex items-center gap-5">
                             <div className="absolute -top-10 -left-10 w-24 h-24 bg-sky-200/40 rounded-full blur-3xl animate-pulse"></div>
                             
-                            {/* Original Box Stars Admin Trigger */}
                             <div onClick={() => !isAdmin ? setShowLogin(true) : setIsAdmin(false)} className="relative group cursor-pointer z-10">
                                 <div className={`bg-gradient-to-br from-sky-400 to-violet-400 p-3.5 rounded-2xl shadow-xl transform transition-all ${isAdmin ? 'ring-4 ring-sky-300' : 'group-hover:scale-110'}`}>
                                     <Icon name="sparkles" className="text-white fill-white" size={32} />
@@ -370,7 +365,7 @@
                                     <input type="text" placeholder="Search..." className="w-full pl-11 pr-4 py-4 bg-white/90 border border-sky-100 rounded-[1.5rem] outline-none shadow-sm focus:ring-4 focus:ring-sky-500/5 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                                 </div>
                                 {isAdmin && (
-                                    <button onClick={() => setIsAdding(true)} className="bg-gradient-to-r from-sky-400 to-violet-400 text-white p-4 rounded-[1.5rem] shadow-xl shadow-sky-500/20 hover:scale-105 transition-all">
+                                    <button onClick={() => setIsAdding(true)} className="bg-gradient-to-r from-sky-400 to-violet-400 text-white p-4 rounded-[1.5rem] shadow-xl shadow-sky-500/20 transition-all">
                                         <Icon name="plus" size={24} />
                                     </button>
                                 )}
@@ -412,18 +407,36 @@
                                         </div>
                                         <h3 className="font-bold text-lg mb-6 text-slate-800 leading-tight truncate pr-4">{item.title}</h3>
                                         
-                                        {item.type === 'folder' ? (
-                                            <button onClick={() => setCurrentFolderId(item.id)} className="w-full flex justify-center py-3.5 bg-amber-50 font-bold text-[10px] uppercase tracking-widest text-amber-600 rounded-xl hover:bg-amber-400 hover:text-white transition-all">Open Folder</button>
-                                        ) : (
-                                            <a 
-                                                href={item.type === 'file' ? getDownloadUrl(item.url) : item.url} 
-                                                target="_blank" 
-                                                download={item.type === 'file' ? item.title : false}
-                                                className="w-full flex justify-center py-3.5 bg-slate-50 font-bold text-[10px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm"
-                                            >
-                                                {item.type === 'file' ? 'Download / View' : 'Launch Link'}
-                                            </a>
-                                        )}
+                                        <div className="flex flex-col gap-2">
+                                            {item.type === 'folder' ? (
+                                                <button onClick={() => setCurrentFolderId(item.id)} className="w-full flex justify-center py-3.5 bg-amber-50 font-bold text-[10px] uppercase tracking-widest text-amber-600 rounded-xl hover:bg-amber-400 hover:text-white transition-all">Open Folder</button>
+                                            ) : item.type === 'file' ? (
+                                                <div className="flex gap-2">
+                                                    <a 
+                                                        href={item.url} 
+                                                        target="_blank" 
+                                                        className="flex-1 flex justify-center py-3 bg-slate-50 font-bold text-[9px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm"
+                                                    >
+                                                        View
+                                                    </a>
+                                                    <a 
+                                                        href={getDownloadUrl(item.url)} 
+                                                        download={item.title}
+                                                        className="flex-1 flex justify-center py-3 bg-slate-100 font-bold text-[9px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm"
+                                                    >
+                                                        Download
+                                                    </a>
+                                                </div>
+                                            ) : (
+                                                <a 
+                                                    href={item.url} 
+                                                    target="_blank" 
+                                                    className="w-full flex justify-center py-3.5 bg-slate-50 font-bold text-[10px] uppercase tracking-widest text-slate-500 rounded-xl hover:bg-sky-500 hover:text-white transition-all shadow-sm"
+                                                >
+                                                    Launch Link
+                                                </a>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
